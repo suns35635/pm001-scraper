@@ -142,5 +142,5 @@ jobs:
         uses: benc-uk/workflow-dispatch@v1
         with:
           workflow: analyzer.yml
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.WORKFLOW_PAT }}
           inputs: '{"data_date": "${{ env.RUN_DATE }}", "data_file": "data/daily/${{ env.RUN_DATE }}/pm001_recent_posts.tsv"}'
