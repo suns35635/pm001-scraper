@@ -11,7 +11,8 @@ on:
 # 全局环境变量
 env:
   PYTHON_VERSION: "3.9"
-  RUN_DATE: ${{ format('{0:yyyy-MM-dd}', github.event.head_commit.timestamp || github.event.repository.updated_at || github.event.schedule) }}
+  # 使用shell命令定义日期，而不是复杂的format函数
+  RUN_DATE: ${{ github.event.inputs.date || '' }}
 
 # 定义工作流的权限
 permissions:
@@ -33,7 +34,12 @@ jobs:
           # 完整克隆以便进行Git操作
           fetch-depth: 0
 
-      # 步骤2: 设置Python环境
+      # 步骤2: 设置日期环境变量
+      - name: 设置日期环境变量
+        run: |
+          echo "RUN_DATE=$(date -u +"%Y-%m-%d")" >> $GITHUB_ENV
+
+      # 步骤3: 设置Python环境
       - name: 设置Python环境
         uses: actions/setup-python@v5
         with:
@@ -41,7 +47,7 @@ jobs:
           # 启用依赖缓存
           cache: "pip"
 
-      # 步骤3: 安装依赖
+      # 步骤4: 安装依赖
       - name: 安装依赖
         run: |
           python -m pip install --upgrade pip
@@ -52,14 +58,14 @@ jobs:
             pip install requests beautifulsoup4
           fi
 
-      # 步骤4: 创建数据目录
+      # 步骤5: 创建数据目录
       - name: 创建数据目录
         run: |
           mkdir -p data/daily
           echo "创建日期目录: data/daily/${{ env.RUN_DATE }}"
           mkdir -p data/daily/${{ env.RUN_DATE }}
 
-      # 步骤5: 运行爬虫脚本
+      # 步骤6: 运行爬虫脚本
       - name: 运行爬虫脚本
         id: run-scraper
         continue-on-error: true # 允许失败后继续执行工作流
@@ -82,7 +88,7 @@ jobs:
             echo "file_size=0" >> $GITHUB_OUTPUT
           fi
 
-      # 步骤6: 创建运行状态文件
+      # 步骤7: 创建运行状态文件
       - name: 创建爬虫状态文件
         run: |
           mkdir -p .github/status
@@ -110,7 +116,7 @@ jobs:
           fi
           echo "已创建爬虫状态文件"
 
-      # 步骤7: 提交结果和状态到仓库
+      # 步骤8: 提交结果和状态到仓库
       - name: 提交爬虫结果和状态
         run: |
           echo "正在提交爬虫结果和状态..."
@@ -134,7 +140,7 @@ jobs:
             echo "成功提交并推送爬虫结果和状态"
           fi
 
-      # 步骤8: 触发分析工作流
+      # 步骤9: 触发分析工作流
       - name: 触发分析工作流
         if: steps.run-scraper.outputs.file_exists == 'true'
         uses: benc-uk/workflow-dispatch@v1
