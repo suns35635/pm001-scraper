@@ -94,25 +94,21 @@ jobs:
           mkdir -p .github/status
           # 创建状态文件
           if [ "${{ steps.run-scraper.outcome }}" == "success" ] && [ "${{ steps.run-scraper.outputs.file_exists }}" == "true" ]; then
-            cat > .github/status/crawler_status.json << EOF
-            {
+            echo '{
               "status": "success",
               "date": "${{ env.RUN_DATE }}",
-              "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+              "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'",
               "file_path": "data/daily/${{ env.RUN_DATE }}/pm001_recent_posts.tsv",
               "file_size": "${{ steps.run-scraper.outputs.file_size }}",
               "message": "爬虫运行成功，已生成数据文件"
-            }
-EOF
+            }' > .github/status/crawler_status.json
           else
-            cat > .github/status/crawler_status.json << EOF
-            {
+            echo '{
               "status": "failed",
               "date": "${{ env.RUN_DATE }}",
-              "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+              "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'",
               "message": "爬虫运行失败或未生成文件"
-            }
-EOF
+            }' > .github/status/crawler_status.json
           fi
           echo "已创建爬虫状态文件"
 
