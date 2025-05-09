@@ -1,0 +1,119 @@
+name: AI Data Analysis
+
+# 触发条件
+on:
+  # 当指定路径的文件发生变化时自动触发
+  push:
+    paths:
+      - "data/**/*.txt"
+      - "data/**/*.md"
+      - "sample_data.txt"
+
+  # 支持手动触发，可以指定参数
+  workflow_dispatch:
+    inputs:
+      file_path:
+        description: "要分析的文件路径"
+        required: true
+        default: "data/sales/monthly_data.txt"
+      prompt_file:
+        description: "提示词文件路径"
+        required: false
+        default: "sales_prompt.txt"
+      output_file:
+        description: "分析结果输出路径"
+        required: false
+        default: "analysis_result.md"
+
+  # 定期执行（可选）
+  schedule:
+    - cron: "0 0 * * 1" # 每周一UTC时间0点执行
+
+# 权限设置
+permissions:
+  contents: write # 允许工作流向仓库写入内容
+
+# 工作定义
+jobs:
+  analyze:
+    name: 分析数据
+    runs-on: ubuntu-latest
+
+    steps:
+      # 检出代码
+      - name: 检出仓库代码
+        uses: actions/checkout@v3
+
+      # 设置Python环境
+      - name: 设置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      # 安装依赖
+      - name: 安装所需依赖
+        run: |
+          pip install openai
+
+      # 获取已更改的文件
+      - name: 获取已更改的文件
+        id: changed-files
+        if: github.event_name == 'push'
+        run: |
+          FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.event.after }} | grep -E "data/.*\.(txt|md)$" | head -1)
+          if [ -n "$FILES" ]; then
+            echo "file_path=$FILES" >> $GITHUB_OUTPUT
+            echo "prompt_file=sales_prompt.txt" >> $GITHUB_OUTPUT
+            echo "output_file=analysis_results/$(basename $FILES .txt)_analysis.md" >> $GITHUB_OUTPUT
+            # 确保输出目录存在
+            mkdir -p analysis_results
+          else
+            echo "file_path=" >> $GITHUB_OUTPUT
+          fi
+
+      # 准备分析参数
+      - name: 准备分析参数
+        id: params
+        run: |
+          # 如果是手动触发，则使用输入的参数
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "file_path=${{ github.event.inputs.file_path }}" >> $GITHUB_OUTPUT
+            echo "prompt_file=${{ github.event.inputs.prompt_file }}" >> $GITHUB_OUTPUT
+            echo "output_file=${{ github.event.inputs.output_file }}" >> $GITHUB_OUTPUT
+          # 如果是push事件且有变更文件
+          elif [ "${{ github.event_name }}" == "push" ] && [ -n "${{ steps.changed-files.outputs.file_path }}" ]; then
+            echo "file_path=${{ steps.changed-files.outputs.file_path }}" >> $GITHUB_OUTPUT
+            echo "prompt_file=${{ steps.changed-files.outputs.prompt_file }}" >> $GITHUB_OUTPUT
+            echo "output_file=${{ steps.changed-files.outputs.output_file }}" >> $GITHUB_OUTPUT
+          else
+            # 默认参数
+            echo "file_path=data/sales/monthly_data.txt" >> $GITHUB_OUTPUT
+            echo "prompt_file=sales_prompt.txt" >> $GITHUB_OUTPUT
+            echo "output_file=analysis_results/default_analysis.md" >> $GITHUB_OUTPUT
+            # 确保输出目录存在
+            mkdir -p analysis_results
+          fi
+
+      # 运行分析
+      - name: 运行AI分析
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          # 检查文件是否存在
+          if [ -f "${{ steps.params.outputs.file_path }}" ]; then
+            python simple_ai_analyzer.py ${{ steps.params.outputs.file_path }} \
+              -f ${{ steps.params.outputs.prompt_file }} \
+              -o ${{ steps.params.outputs.output_file }}
+          else
+            echo "指定的文件不存在: ${{ steps.params.outputs.file_path }}"
+            exit 1
+          fi
+
+      # 提交分析结果
+      - name: 提交分析结果
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add ${{ steps.params.outputs.output_file }}
+          git commit -m "自动分析: ${{ steps.params.outputs.file_path }}" || echo "没有变更需要提交"
+          git push origin ${GITHUB_REF##*/}

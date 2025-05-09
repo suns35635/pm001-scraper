@@ -1,0 +1,184 @@
+name: PM001 AI分析任务
+
+# 定义何时触发此工作流程
+on:
+  # 允许手动触发，并接收参数
+  workflow_dispatch:
+    inputs:
+      data_date:
+        description: "数据日期 (YYYY-MM-DD格式)"
+        required: true
+        type: string
+      data_file:
+        description: "要分析的数据文件路径"
+        required: true
+        type: string
+
+  # 也可以通过仓库事件触发
+  repository_dispatch:
+    types: [crawler_completed]
+
+# 全局环境变量
+env:
+  PYTHON_VERSION: "3.9"
+  ANALYSIS_DIR: "analysis/daily"
+
+# 定义工作流的权限
+permissions:
+  # 只需要内容写入权限
+  contents: write
+
+# 定义工作流中的作业
+jobs:
+  # 分析作业
+  analyze-data:
+    name: 分析爬虫数据
+    runs-on: ubuntu-latest
+
+    steps:
+      # 步骤1: 检出代码
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
+        with:
+          # 完整克隆以便进行Git操作
+          fetch-depth: 0
+
+      # 步骤2: 设置Python环境
+      - name: 设置Python环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          # 启用依赖缓存
+          cache: "pip"
+
+      # 步骤3: 安装依赖
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            echo "安装必要的依赖..."
+            pip install openai pandas requests
+          fi
+
+      # 步骤4: 确定分析参数
+      - name: 确定分析参数
+        id: params
+        run: |
+          # 从参数中获取数据日期和文件路径
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            DATA_DATE="${{ github.event.inputs.data_date }}"
+            DATA_FILE="${{ github.event.inputs.data_file }}"
+          elif [ "${{ github.event_name }}" == "repository_dispatch" ]; then
+            DATA_DATE="${{ github.event.client_payload.data_date }}"
+            DATA_FILE="${{ github.event.client_payload.data_file }}"
+          else
+            # 如果没有参数，尝试从状态文件获取最新数据
+            if [ -f ".github/status/crawler_status.json" ]; then
+              DATA_DATE=$(jq -r '.date' .github/status/crawler_status.json)
+              DATA_FILE=$(jq -r '.file_path' .github/status/crawler_status.json)
+            else
+              echo "错误: 无法确定数据日期和文件路径"
+              exit 1
+            fi
+          fi
+
+          # 确保日期目录存在
+          mkdir -p "${ANALYSIS_DIR}/${DATA_DATE}"
+
+          # 检查数据文件是否存在
+          if [ ! -f "${DATA_FILE}" ]; then
+            echo "错误: 数据文件 ${DATA_FILE} 不存在"
+            exit 1
+          fi
+
+          # 设置输出参数
+          echo "data_date=${DATA_DATE}" >> $GITHUB_OUTPUT
+          echo "data_file=${DATA_FILE}" >> $GITHUB_OUTPUT
+          echo "analysis_dir=${ANALYSIS_DIR}/${DATA_DATE}" >> $GITHUB_OUTPUT
+          echo "设置分析参数: 日期=${DATA_DATE}, 文件=${DATA_FILE}"
+
+      # 步骤5: 运行AI分析
+      - name: 运行AI分析
+        id: run-analysis
+        continue-on-error: true
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK_URL }}
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          WECHAT_WORK_WEBHOOK_URL: ${{ secrets.WECHAT_WORK_WEBHOOK_URL }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          echo "开始分析数据文件: ${{ steps.params.outputs.data_file }}"
+
+          # 运行AI分析脚本
+          python ai.py "${{ steps.params.outputs.data_file }}"
+
+          # 检查分析结果文件
+          if [ -f "analysis_result.md" ]; then
+            echo "分析成功完成，发现结果文件"
+            echo "analysis_exists=true" >> $GITHUB_OUTPUT
+            
+            # 复制到日期目录
+            cp analysis_result.md "${{ steps.params.outputs.analysis_dir }}/analysis_${{ steps.params.outputs.data_date }}.md"
+            echo "分析结果已保存到日期目录"
+          else
+            echo "警告：未找到分析结果文件"
+            echo "analysis_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      # 步骤6: 创建分析状态文件
+      - name: 创建分析状态文件
+        run: |
+          mkdir -p .github/status
+          # 创建状态文件
+          if [ "${{ steps.run-analysis.outcome }}" == "success" ] && [ "${{ steps.run-analysis.outputs.analysis_exists }}" == "true" ]; then
+            cat > .github/status/analyzer_status.json << EOF
+            {
+              "status": "success",
+              "date": "${{ steps.params.outputs.data_date }}",
+              "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+              "data_file": "${{ steps.params.outputs.data_file }}",
+              "analysis_file": "${{ steps.params.outputs.analysis_dir }}/analysis_${{ steps.params.outputs.data_date }}.md",
+              "message": "数据分析成功完成"
+            }
+            EOF
+          else
+            cat > .github/status/analyzer_status.json << EOF
+            {
+              "status": "failed",
+              "date": "${{ steps.params.outputs.data_date }}",
+              "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+              "data_file": "${{ steps.params.outputs.data_file }}",
+              "message": "数据分析失败或无结果"
+            }
+            EOF
+          fi
+          echo "已创建分析状态文件"
+
+      # 步骤7: 提交分析结果和状态到仓库
+      - name: 提交分析结果和状态
+        run: |
+          echo "正在提交分析结果和状态..."
+          # 设置git配置
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # 添加需要提交的文件
+          if [ -f "analysis_result.md" ]; then
+            git add analysis_result.md
+          fi
+          git add "${{ steps.params.outputs.analysis_dir }}/" || echo "没有分析目录变更"
+          git add .github/status/analyzer_status.json
+
+          # 检查是否有变更需要提交
+          if git diff --staged --quiet; then
+            echo "没有变更需要提交"
+          else
+            # 创建提交
+            git commit -m "自动更新：AI分析结果 ${{ steps.params.outputs.data_date }}"
+            # 推送到仓库
+            git push
+            echo "成功提交并推送分析结果和状态"
+          fi
