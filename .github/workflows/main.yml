@@ -1,44 +1,90 @@
-name: Run PM001 Scraper
+name: PM001 Web Scraper
 
+# 定义何时触发此工作流程
 on:
+  # 允许手动触发
+  workflow_dispatch:
+  # 定时触发，每天UTC时间2点(相当于北京时间10点)
   schedule:
-    - cron: '0 2 * * *'  # 每天UTC时间2点运行（相当于北京时间10点）
-  workflow_dispatch:      # 允许手动触发
+    - cron: '0 2 * * *'
 
+# 全局环境变量
+env:
+  PYTHON_VERSION: '3.9'
+
+# 定义工作流的权限
+permissions:
+  # 只需要内容写入权限
+  contents: write
+
+# 定义工作流中的作业
 jobs:
-  scrape:
+  # 爬虫作业
+  scrape-website:
+    name: Run Web Scraper
     runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-      with:
-        fetch-depth: 0  # 获取完整的历史记录，以便正确进行git操作
     
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-        
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install requests beautifulsoup4; fi
-        
-    - name: Run scraper
-      run: |
-        python 测试.py
-        
-    - name: Upload results as artifact
-      uses: actions/upload-artifact@v3
-      with:
-        name: scraped-data-${{ github.run_number }}
-        path: pm001_recent_posts.tsv
-        retention-days: 90  # 保留90天
-        
-    - name: Commit and push results
-      run: |
-        git config --global user.name 'GitHub Actions Bot'
-        git config --global user.email 'actions@github.com'
-        git add pm001_recent_posts.tsv || true
-        git diff --quiet && git diff --staged --quiet || git commit -m "自动更新爬虫数据 $(date +'%Y-%m-%d')"
-        git push || echo "No changes to push"
+    steps:
+      # 步骤1: 检出代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # 完整克隆以便进行Git操作
+          fetch-depth: 0
+      
+      # 步骤2: 设置Python环境
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          # 启用依赖缓存
+          cache: 'pip'
+      
+      # 步骤3: 安装依赖
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            echo "安装必要的依赖..."
+            pip install requests beautifulsoup4
+          fi
+      
+      # 步骤4: 运行爬虫脚本
+      - name: Run web scraper
+        id: run-scraper
+        run: |
+          echo "开始运行爬虫..."
+          python 测试.py
+          # 检查生成的文件
+          if [ -f "pm001_recent_posts.tsv" ]; then
+            echo "爬虫成功完成，发现结果文件"
+            echo "file_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "警告：未找到结果文件"
+            echo "file_exists=false" >> $GITHUB_OUTPUT
+          fi
+      
+      # 步骤5: 提交结果到仓库
+      - name: Commit results to repository
+        if: steps.run-scraper.outputs.file_exists == 'true'
+        run: |
+          echo "正在提交爬虫结果..."
+          # 设置git配置
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # 添加并提交文件
+          git add pm001_recent_posts.tsv
+          
+          # 检查是否有变更需要提交
+          if git diff --staged --quiet; then
+            echo "没有变更需要提交"
+          else
+            # 创建提交
+            git commit -m "自动更新：爬虫数据 $(date +'%Y-%m-%d')"
+            # 推送到仓库
+            git push
+            echo "成功提交并推送结果"
+          fi
