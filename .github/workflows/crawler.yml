@@ -103,7 +103,7 @@ jobs:
               "file_size": "${{ steps.run-scraper.outputs.file_size }}",
               "message": "爬虫运行成功，已生成数据文件"
             }
-            EOF
+EOF
           else
             cat > .github/status/crawler_status.json << EOF
             {
@@ -112,7 +112,7 @@ jobs:
               "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
               "message": "爬虫运行失败或未生成文件"
             }
-            EOF
+EOF
           fi
           echo "已创建爬虫状态文件"
 
