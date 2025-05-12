@@ -561,12 +561,9 @@ def analyze_and_notify(data_file: str) -> bool:
 
     # 3. 保存分析结果
     try:
-        with open('analysis_result.md', 'w', encoding='utf-8') as f:
-            f.write("**AI分析TSV结果**:\n")
-            f.write("```\n")
+        with open('analysis_result.tsv', 'w', encoding='utf-8') as f:
             f.write(ai_analysis)
-            f.write("\n```\n")
-        print("分析结果已保存到 analysis_result.md")
+        print("分析结果已保存到 analysis_result.tsv")
     except Exception as e:
         print(f"保存分析结果时出错: {e}")
 
