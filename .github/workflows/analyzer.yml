@@ -134,26 +134,22 @@ jobs:
           mkdir -p .github/status
           # 创建状态文件
           if [ "${{ steps.run-analysis.outcome }}" == "success" ] && [ "${{ steps.run-analysis.outputs.analysis_exists }}" == "true" ]; then
-            cat > .github/status/analyzer_status.json << EOF
-            {
+            echo '{
               "status": "success",
-              "date": "${{ steps.params.outputs.data_date }}",
-              "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
-              "data_file": "${{ steps.params.outputs.data_file }}",
-              "analysis_file": "${{ steps.params.outputs.analysis_dir }}/analysis_${{ steps.params.outputs.data_date }}.md",
+              "date": "'${{ steps.params.outputs.data_date }}'",
+              "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'",
+              "data_file": "'${{ steps.params.outputs.data_file }}'",
+              "analysis_file": "'${{ steps.params.outputs.analysis_dir }}/analysis_${{ steps.params.outputs.data_date }}.md'",
               "message": "数据分析成功完成"
-            }
-            EOF
+            }' > .github/status/analyzer_status.json
           else
-            cat > .github/status/analyzer_status.json << EOF
-            {
+            echo '{
               "status": "failed",
-              "date": "${{ steps.params.outputs.data_date }}",
-              "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
-              "data_file": "${{ steps.params.outputs.data_file }}",
+              "date": "'${{ steps.params.outputs.data_date }}'",
+              "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'",
+              "data_file": "'${{ steps.params.outputs.data_file }}'",
               "message": "数据分析失败或无结果"
-            }
-            EOF
+            }' > .github/status/analyzer_status.json
           fi
           echo "已创建分析状态文件"
 
