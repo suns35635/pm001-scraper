@@ -17,7 +17,12 @@ from requests.packages.urllib3.util.retry import Retry
 
 # 站点配置
 BASE_URL = "http://www.pm001.net/"
-TARGET_BOARD_IDS = [1, 2, 3, 4, 7, 8, 9, 10, 11, 12, 21, 22, 36]  # 要抓取的板块ID列表
+TARGET_BOARD_IDS = [
+    5, 7, 8, 120, 143, 159, 160, 161, 162, 168, 190, 191, 192, 193, 195, 196, 199, 211, # 邮票类
+    2, 9, 10, 11, 119, 128, 136, 148, 151, 163, 165, 169, 171, 184, 210,                # 钱币类
+    3, 74, 185,                                                                            # 卡类
+    23, 155, 157, 166, 187, 198                                                            # 古玩杂项
+]
 DAYS_LIMIT = 2  # 抓取最近几天的帖子
 PAGES_PER_BOARD = 2  # 每个板块抓取的页数
 
@@ -52,6 +57,18 @@ USER_AGENTS = [
     'Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Mobile/15E148 Safari/604.1',
     'Mozilla/5.0 (iPad; CPU OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Mobile/15E148 Safari/604.1',
 ]
+
+# board_id到中文名称映射
+BOARD_ID_NAME_MAP = {
+    # 邮票类
+    "5": "小版张专栏", "7": "邮资片JP专栏", "8": "纪特文编JT新票栏目", "120": "年册/集邮工具", "143": "港澳邮票专栏", "159": "编年版票专栏", "160": "贺年封片简卡", "161": "纪特文编JT销封栏目", "162": "小本票/大本册专栏", "168": "邮票、封片靓号专栏", "190": "普封普片", "191": "邮资片TP/YP/FP", "192": "个性化原票专栏", "193": "JF封/其它类封", "195": "贺年邮票/贺卡邮票/军邮邮票", "196": "编年套票栏目", "199": "原地实寄/外交/极限等封片", "211": "邮票大类产品票礼品册",
+    # 钱币类
+    "2": "钱币大卖场", "9": "现代金银贵金属币", "10": "普通纪念币", "11": "一二三版纸币", "119": "第四版纸币", "128": "纸币冠号（不含流通纸币）", "136": "评级币评级钞", "148": "古币银元", "151": "联体钞/纪念钞", "163": "清朝民国纸币/老银票", "165": "贵金属金银铜纪念章", "169": "外国纸币、硬币", "171": "新中国兑换券、债券、测试券", "184": "港澳台钱币专栏", "210": "硬币专栏",
+    # 卡类
+    "3": "卡类大卖场", "74": "田村卡IC卡专栏", "185": "其它卡类卖场",
+    # 古玩杂项
+    "23": "古玩金银铜瓷陶器", "155": "古玩竹木雕漆器", "157": "书报字画", "166": "当代新制玉器", "187": "其它古玩杂件藏品", "198": "历代古玉器"
+}
 
 #########################################
 # 初始化部分
@@ -461,15 +478,16 @@ if __name__ == '__main__':
             recent_posts_sorted = sorted(recent_posts, key=lambda x: x['date'], reverse=True)
             for post in recent_posts_sorted:
                 logger.info(f"标题: {post['title']} | 作者: {post['author']} | 日期: {post['date'].strftime('%Y-%m-%d %H:%M:%S')} | 板块: {post['board_id']} | 回复/浏览: {post['replies']}/{post['views']}")
-            
             try:
                 with open(OUTPUT_FILENAME, 'w', newline='', encoding='utf-8-sig') as tsvfile:
-                    fieldnames = TSV_FIELDS
+                    fieldnames = ['board_id', 'board_name', 'page', 'post_id', 'title', 'author', 'date', 'replies', 'views']
                     writer = csv.DictWriter(tsvfile, fieldnames=fieldnames, delimiter='\t')
                     writer.writeheader()
                     for post_data in recent_posts_sorted:
                         post_data_tsv = post_data.copy()
                         post_data_tsv['date'] = post_data['date'].strftime('%Y-%m-%d %H:%M:%S')
+                        board_id_str = str(post_data_tsv['board_id'])
+                        post_data_tsv['board_name'] = BOARD_ID_NAME_MAP.get(board_id_str, board_id_str)
                         writer.writerow(post_data_tsv)
                 logger.info(f"\n结果已保存到 {OUTPUT_FILENAME}")
             except Exception as e:
@@ -482,3 +500,4 @@ if __name__ == '__main__':
         logger.critical(f"程序执行过程中发生未处理的异常: {str(e)}")
         import traceback
         logger.critical(traceback.format_exc())
+
