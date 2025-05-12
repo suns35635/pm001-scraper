@@ -13,6 +13,9 @@ import pandas as pd
 import requests
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
+import math
+import re
+import concurrent.futures
 
 # 如果使用OpenAI兼容接口调用Gemini API
 try:
@@ -22,6 +25,18 @@ except ImportError:
     HAS_OPENAI = False
     print("警告: openai 库未安装，AI分析功能将不可用")
     print("可通过 pip install openai 安装")
+
+# board_id到中文名称映射
+BOARD_ID_NAME_MAP = {
+    # 邮票类
+    "5": "小版张专栏", "7": "邮资片JP专栏", "8": "纪特文编JT新票栏目", "120": "年册/集邮工具", "143": "港澳邮票专栏", "159": "编年版票专栏", "160": "贺年封片简卡", "161": "纪特文编JT销封栏目", "162": "小本票/大本册专栏", "168": "邮票、封片靓号专栏", "190": "普封普片", "191": "邮资片TP/YP/FP", "192": "个性化原票专栏", "193": "JF封/其它类封", "195": "贺年邮票/贺卡邮票/军邮邮票", "196": "编年套票栏目", "199": "原地实寄/外交/极限等封片", "211": "邮票大类产品票礼品册",
+    # 钱币类
+    "2": "钱币大卖场", "9": "现代金银贵金属币", "10": "普通纪念币", "11": "一二三版纸币", "119": "第四版纸币", "128": "纸币冠号（不含流通纸币）", "136": "评级币评级钞", "148": "古币银元", "151": "联体钞/纪念钞", "163": "清朝民国纸币/老银票", "165": "贵金属金银铜纪念章", "169": "外国纸币、硬币", "171": "新中国兑换券、债券、测试券", "184": "港澳台钱币专栏", "210": "硬币专栏",
+    # 卡类
+    "3": "卡类大卖场", "74": "田村卡IC卡专栏", "185": "其它卡类卖场",
+    # 古玩杂项
+    "23": "古玩金银铜瓷陶器", "155": "古玩竹木雕漆器", "157": "书报字画", "166": "当代新制玉器", "187": "其它古玩杂件藏品", "198": "历代古玉器"
+}
 
 class AIAnalyzer:
     """使用AI分析爬虫数据并生成洞察"""
@@ -73,7 +88,7 @@ class AIAnalyzer:
         # 使用AI分析数据
         ai_analysis = None
         if self.client:
-            ai_analysis = self._get_ai_insights(summary)
+            ai_analysis = self._get_ai_insights(df)
             
         return summary, ai_analysis
     
@@ -127,42 +142,41 @@ class AIAnalyzer:
         
         return summary
     
-    def _get_ai_insights(self, summary: Dict[str, Any]) -> Optional[str]:
+    def _get_ai_insights(self, df: pd.DataFrame) -> Optional[str]:
         """使用Gemini API获取数据洞察"""
         if not self.client:
             return None
             
         try:
-            # 构建分析提示词
-            analysis_prompt = f"""
+            analysis_prompt = """
             **AI提示词：钱币市场信息提取与分类（收购与出售 - TSV输出）**
 
             **你的角色：** 你是一个钱币市场信息分析助手。
 
             **你的任务：**
-            请仔细阅读并分析下面提供的每一个帖子标题及其附带的元数据（board_id, title）。你需要：
-            1.  判断该帖子的主要意图是 **“收购”（想买）** 还是 **“出售”（想卖）**，或者意图不明确归为 **“其他”**。
-            2.  从标题中提取相关的 **“物品名称”**。
-            3.  提取任何与价格相关的信息，记录在 **“价格描述”** 中（例如：“428元一捆”，“每张188元”，“1060出”，“金价售”，“高价求购”，“面议”等）。
-            4.  如果“价格描述”中包含明确的阿拉伯数字，请将其提取到 **“数值价格”** 字段；若无明确数字，则此字段为空。
-            5.  根据意图和价格信息，判断 **“价格类型”**（“收购价”、“出售价”或“N/A”）。
-            6.  提取任何与数量相关的信息，记录在 **“数量描述”** 中（例如：“一捆”，“5桶”，“整包”，“5-10枚”）。
-            7.  提取描述物品 **“特征/品相”** 的信息（例如：“无油”，“小号”，“靓号”，“原桶”，“评级货”，“无47”，“NGC首日70分”）。
-            8.  将提取的信息与给定的 `board_id` 和 `title ` 一同输出。
+            请仔细阅读并分析下面提供的每一个帖子标题及其附带的元数据（board_id,board_name, title）。你需要：
+            1.  判断该帖子的主要意图是 **"收购"（想买）** 还是 **"出售"（想卖）**，或者意图不明确归为 **"其他"**。
+            2.  从标题中提取相关的 **"物品名称"**。
+            3.  提取任何与价格相关的信息，记录在 **"价格描述"** 中（例如："428元一捆"，"每张188元"，"1060出"，"金价售"，"高价求购"，"面议"等）。
+            4.  如果"价格描述"中包含明确的阿拉伯数字，请将其提取到 **"数值价格"** 字段；若无明确数字，则此字段为空。
+            5.  根据意图和价格信息，判断 **"价格类型"**（"收购价"、"出售价"或"N/A"）。
+            6.  提取任何与数量相关的信息，记录在 **"数量描述"** 中（例如："一捆"，"5桶"，"整包"，"5-10枚"）。
+            7.  提取描述物品 **"特征/品相"** 的信息（例如："无油"，"小号"，"靓号"，"原桶"，"评级货"，"无47"，"NGC首日70分"）。
+            8.  将提取的信息与给定的 `board_id` 和 `board_name`和 `title` 一同输出。
 
             **处理规则与注意事项：**
 
             * **意图分类：**
-                * 包含“收购”、“求购”、“求”、“收”、“寻”等通常表示想买。
-                * 包含“出”、“售”、“转让”、“批”等通常表示想卖。
-                * 若意图不明确，或同时包含买卖信息难以区分，则归为“其他”。
+                * 包含"收购"、"求购"、"求"、"收"、"寻"等通常表示想买。
+                * 包含"出"、"售"、"转让"、"批"等通常表示想卖。
+                * 若意图不明确，或同时包含买卖信息难以区分，则归为"其他"。
             * **物品名称：** 提取核心的、可识别的物品名称。
             * **价格信息：**
-                * “价格描述”要尽可能完整记录原文中关于价格的说法。
-                * “数值价格”只填写纯数字，方便后续计算。如果价格是一个范围（如“5-10元”），可记录范围或平均值（并注明），或暂时只记录范围的第一个数字。
-                * 如果“价格描述”中没有具体数字（如“高价”、“面议”），则“数值价格”字段留空。
+                * "价格描述"要尽可能完整记录原文中关于价格的说法。
+                * "数值价格"只填写纯数字，方便后续计算。如果价格是一个范围（如"5-10元"），可记录范围或平均值（并注明），或暂时只记录范围的第一个数字。
+                * 如果"价格描述"中没有具体数字（如"高价"、"面议"），则"数值价格"字段留空。
             * **特征/品相：** 记录所有能描述物品状态、版本、评级等关键信息。
-            * **完整性：** 尽量为每一个被识别为“收购”或“出售”的帖子都提取信息，即使某些字段（如价格、数量）可能为空。
+            * **完整性：** 尽量为每一个被识别为"收购"或"出售"的帖子都提取信息，即使某些字段（如价格、数量）可能为空。
 
             **输出格式要求（TSV - Tab-Separated Values）：**
             请直接生成TSV格式的内容。
@@ -173,24 +187,23 @@ class AIAnalyzer:
             **TSV输出示例：**
 
             ```tsv
-            原始标题文本	意图分类	物品名称	价格描述	数值价格	价格类型	数量描述	特征/品相	板块ID	日期
-            (示例) 原捆无油一分428元一捆，小号一分698一捆	出售	一分(纸币)	428元一捆, 698一捆	428, 698	出售价	一捆	原捆无油, 小号	11	2025-05-09 14:20:00
-            (示例) 长期收购：三版伍角纺织工人包捆	收购	三版伍角纺织工人		N/A	包捆		11	2025-05-09 14:19:43
+            原始标题文本	意图分类	物品名称	价格描述	数值价格	价格类型	数量描述	特征/品相	板块ID	板块名称	日期
+            (示例) 原捆无油一分428元一捆，小号一分698一捆	出售	一分(纸币)	428元一捆, 698一捆	428, 698	出售价	一捆	原捆无油, 小号	11	钱币大卖场	2025-05-09 14:20:00
+            (示例) 长期收购：三版伍角纺织工人包捆	收购	三版伍角纺织工人		N/A	包捆		11	钱币大卖场	2025-05-09 14:19:43
             (示例) 1060出龙银币---5桶-原桶	出售	龙银币	1060出	1060	出售价	5桶	原桶	9	2025-05-09 14:18:05
             (示例) 980求龙原桶1000枚	收购	龙(币)	980求	980	收购价	1000枚, 原桶		9	2025-05-09 14:15:06
             ... (根据你提供的数据填写，每一列用制表符分隔)
             """
             
-            # 调用Gemini API
+            tsv_data = df.to_csv(sep='\t', index=False)
+            prompt_with_data = analysis_prompt + "\n以下是需要分析的帖子数据（TSV格式）：\n" + tsv_data
             response = self.client.chat.completions.create(
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash-preview-04-17",
                 messages=[
                     {"role": "system", "content": "你是数据分析助手，负责分析爬虫数据并提供简洁的洞察。"},
-                    {"role": "user", "content": analysis_prompt}
+                    {"role": "user", "content": prompt_with_data}
                 ]
             )
-            
-            # 获取分析结果
             ai_analysis = response.choices[0].message.content
             return ai_analysis
             
@@ -411,45 +424,158 @@ class NotificationSender:
         return success
 
 
+def extract_tsv_from_ai_output(ai_output: str) -> list:
+    """
+    从AI输出中提取TSV表头及数据行，过滤说明性文字和错误提示。
+    返回TSV行列表（含表头）。
+    """
+    # 匹配 ```tsv ... ``` 或直接以表头开头的TSV块
+    tsv_block = ""
+    # 优先找```tsv代码块
+    match = re.search(r"```tsv\s*([\s\S]+?)```", ai_output)
+    if match:
+        tsv_block = match.group(1)
+    else:
+        # 退而求其次，找以"原始标题文本"开头的行及其下方内容
+        lines = ai_output.splitlines()
+        for idx, line in enumerate(lines):
+            if line.strip().startswith("原始标题文本"):
+                tsv_block = "\n".join(lines[idx:])
+                break
+    # 分割为行，去除空行和错误提示
+    tsv_lines = [l for l in tsv_block.splitlines() if l.strip() and not l.startswith("AI分析失败") and not l.startswith("# ")]
+    return tsv_lines
+
+def merge_all_ai_tsv_results(ai_outputs: list) -> str:
+    """
+    合并所有AI输出的TSV内容，只保留第一个表头，去重数据行，并将board_id映射为中文名称，新增"板块名称"列。
+    """
+    all_lines = []
+    header = None
+    for ai_output in ai_outputs:
+        tsv_lines = extract_tsv_from_ai_output(ai_output)
+        if not tsv_lines:
+            continue
+        if header is None:
+            header = tsv_lines[0]
+            all_lines.append(header)
+            all_lines.extend(tsv_lines[1:])
+        else:
+            all_lines.extend(tsv_lines[1:])
+    # 去重
+    all_lines = [all_lines[0]] + list(dict.fromkeys(all_lines[1:]))
+    # 替换board_id为中文名称，新增"板块名称"列
+    if all_lines:
+        header_fields = all_lines[0].split('\t')
+        if '板块ID' in header_fields:
+            idx = header_fields.index('板块ID')
+            if '板块名称' not in header_fields:
+                header_fields.insert(idx+1, '板块名称')
+            new_lines = ['\t'.join(header_fields)]
+            for line in all_lines[1:]:
+                fields = line.split('\t')
+                if len(fields) > idx:
+                    board_id = fields[idx].strip()
+                    board_name = BOARD_ID_NAME_MAP.get(board_id, board_id)
+                    fields.insert(idx+1, board_name)
+                new_lines.append('\t'.join(fields))
+            return '\n'.join(new_lines)
+    return '\n'.join(all_lines)
+
+
+def split_and_analyze_by_board(data_file: str, analyzer: 'AIAnalyzer', batch_size: int = 100, max_retry: int = 3, max_workers: int = 5) -> str:
+    """
+    按board_id分组并分批调用AI分析，合并所有结果为一个TSV字符串，支持每个板块内批次并发。
+    """
+    if not os.path.exists(data_file):
+        print(f"错误: 文件 {data_file} 不存在")
+        return "数据文件不存在"
+
+    try:
+        df = pd.read_csv(data_file, sep='\t')
+        print(f"成功读取数据文件，包含 {len(df)} 条记录")
+    except Exception as e:
+        print(f"读取文件时出错: {e}")
+        return f"读取文件时出错: {e}"
+
+    ai_outputs = []
+
+    def analyze_batch(board_id, batch_idx, num_batches, batch_df):
+        print(f"  [INFO] 开始AI分析：板块{board_id} 第{batch_idx+1}/{num_batches}批，数据量：{len(batch_df)} 条")
+        ai_result = None
+        for attempt in range(1, max_retry+1):
+            try:
+                ai_result = analyzer._get_ai_insights(batch_df)
+                if ai_result and not ai_result.strip().startswith("AI分析失败"):
+                    print(f"  [SUCCESS] AI分析完成：板块{board_id} 第{batch_idx+1}/{num_batches}批，返回{len(ai_result)}字符 (第{attempt}次尝试)")
+                    print(f"  [AI OUTPUT] 前200字符：\n{ai_result[:200]}\n...")
+                    return ai_result
+                else:
+                    print(f"  [FAIL] AI分析失败或返回无效内容：板块{board_id} 第{batch_idx+1}/{num_batches}批 (第{attempt}次尝试)")
+            except Exception as e:
+                print(f"  [ERROR] AI分析异常：板块{board_id} 第{batch_idx+1}/{num_batches}批，异常：{e} (第{attempt}次尝试)")
+        print(f"  [ERROR] AI分析最终失败：板块{board_id} 第{batch_idx+1}/{num_batches}批，已重试{max_retry}次，跳过该批次")
+        return None
+
+    for board_id, group in df.groupby('board_id'):
+        group = group.reset_index(drop=True)
+        total = len(group)
+        num_batches = math.ceil(total / batch_size)
+        print(f"分析板块 {board_id}，共{total}条，分为{num_batches}批")
+        batch_args = [(board_id, i, num_batches, group.iloc[i*batch_size : (i+1)*batch_size]) for i in range(num_batches)]
+        # 并发处理每个板块的批次
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_idx = {executor.submit(analyze_batch, *args): idx for idx, args in enumerate(batch_args)}
+            # 保证顺序合并
+            batch_results = [None] * num_batches
+            for future in concurrent.futures.as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    result = future.result()
+                    batch_results[idx] = result
+                except Exception as exc:
+                    print(f"  [ERROR] 并发AI分析批次异常: {exc}")
+            # 只收集成功的结果
+            ai_outputs.extend([r for r in batch_results if r and not r.strip().startswith("AI分析失败")])
+
+    print(f"[INFO] 全部AI分析批次完成，开始合并TSV结果")
+    final_tsv = merge_all_ai_tsv_results(ai_outputs)
+    print(f"[INFO] 合并完成，总输出{len(final_tsv.splitlines())}行TSV数据")
+    return final_tsv
+
+
 def analyze_and_notify(data_file: str) -> bool:
     """
-    分析数据并发送通知的主函数
-    
-    参数:
-        data_file: TSV数据文件路径
-        
-    返回:
-        是否成功完成分析和通知
+    分析数据并发送通知的主函数（新版，支持分批AI分析）
     """
     print(f"开始分析文件: {data_file}")
-    
+
     # 1. 初始化AI分析器
     analyzer = AIAnalyzer()
-    
-    # 2. 分析数据
-    summary, ai_analysis = analyzer.analyze_data(data_file)
-    if not summary:
-        print("无法生成数据摘要，退出")
+
+    # 2. 分批AI分析
+    ai_analysis = split_and_analyze_by_board(data_file, analyzer, batch_size=100)
+    if not ai_analysis or ai_analysis.startswith("数据文件不存在") or ai_analysis.startswith("读取文件时出错"):
+        print("AI分析失败，退出")
         return False
-    
-    # 3. 初始化通知发送器
-    sender = NotificationSender()
-    
-    # 4. 准备通知内容
-    notification_content = sender.prepare_notification(summary, ai_analysis)
-    
-    # 5. 保存分析结果
+
+    # 3. 保存分析结果
     try:
         with open('analysis_result.md', 'w', encoding='utf-8') as f:
-            f.write(notification_content)
+            f.write("**AI分析TSV结果**:\n")
+            f.write("```\n")
+            f.write(ai_analysis)
+            f.write("\n```\n")
         print("分析结果已保存到 analysis_result.md")
     except Exception as e:
         print(f"保存分析结果时出错: {e}")
-    
-    # 6. 发送通知
-    success = sender.send_notification(notification_content)
-    
-    return success
+
+    # 4. 可选：发送通知（如需，可拼接简要统计信息）
+    # sender = NotificationSender()
+    # notification_content = sender.prepare_notification({}, ai_analysis)
+    # sender.send_notification(notification_content)
+
+    return True
 
 
 if __name__ == "__main__":
