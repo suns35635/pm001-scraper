@@ -1,8 +1,8 @@
 {
     "status": "success",
     "date": "2025-05-12",
-    "timestamp": "2025-05-12T05:46:18Z",
+    "timestamp": "2025-05-12T22:28:44Z",
     "file_path": "data/daily/2025-05-12/pm001_recent_posts.tsv",
-    "file_size": "1012329",
+    "file_size": "976143",
     "message": "爬虫运行成功，已生成数据文件"
   }
