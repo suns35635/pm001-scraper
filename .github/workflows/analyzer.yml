@@ -116,12 +116,12 @@ jobs:
           python ai.py "${{ steps.params.outputs.data_file }}"
 
           # 检查分析结果文件
-          if [ -f "analysis_result.md" ]; then
+          if [ -f "analysis_result.tsv" ]; then
             echo "分析成功完成，发现结果文件"
             echo "analysis_exists=true" >> $GITHUB_OUTPUT
             
             # 复制到日期目录
-            cp analysis_result.md "${{ steps.params.outputs.analysis_dir }}/analysis_${{ steps.params.outputs.data_date }}.md"
+            cp analysis_result.tsv "${{ steps.params.outputs.analysis_dir }}/analysis_${{ steps.params.outputs.data_date }}.tsv"
             echo "分析结果已保存到日期目录"
           else
             echo "警告：未找到分析结果文件"
@@ -139,7 +139,7 @@ jobs:
               "date": "'${{ steps.params.outputs.data_date }}'",
               "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'",
               "data_file": "'${{ steps.params.outputs.data_file }}'",
-              "analysis_file": "'${{ steps.params.outputs.analysis_dir }}/analysis_${{ steps.params.outputs.data_date }}.md'",
+              "analysis_file": "'${{ steps.params.outputs.analysis_dir }}/analysis_${{ steps.params.outputs.data_date }}.tsv'",
               "message": "数据分析成功完成"
             }' > .github/status/analyzer_status.json
           else
@@ -162,8 +162,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           # 添加需要提交的文件
-          if [ -f "analysis_result.md" ]; then
-            git add analysis_result.md
+          if [ -f "analysis_result.tsv" ]; then
+            git add analysis_result.tsv
           fi
           git add "${{ steps.params.outputs.analysis_dir }}/" || echo "没有分析目录变更"
           git add .github/status/analyzer_status.json
